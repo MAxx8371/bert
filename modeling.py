@@ -1,17 +1,3 @@
-# coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """The main BERT model and related functions."""
 
 from __future__ import absolute_import
@@ -30,7 +16,6 @@ import tensorflow as tf
 
 class BertConfig(object):
   """Configuration for `BertModel`."""
-
   def __init__(self,
                vocab_size,
                hidden_size=768,
@@ -63,7 +48,7 @@ class BertConfig(object):
         ever be used with. Typically set this to something large just in case
         (e.g., 512 or 1024 or 2048).
       type_vocab_size: The vocabulary size of the `token_type_ids` passed into
-        `BertModel`.
+        `BertModel`. (e.g. next sentence prediction任务里的Segment A和 Segment B)
       initializer_range: The stdev of the truncated_normal_initializer for
         initializing all weight matrices.
     """
@@ -108,7 +93,6 @@ class BertModel(object):
   """BERT model ("Bidirectional Encoder Representations from Transformers").
 
   Example usage:
-
   ```python
   # Already been converted into WordPiece token ids
   input_ids = tf.constant([[31, 51, 99], [15, 5, 0]])
@@ -404,24 +388,25 @@ def embedding_lookup(input_ids,
   # If the input is a 2D tensor of shape [batch_size, seq_length], we
   # reshape to [batch_size, seq_length, 1].
   if input_ids.shape.ndims == 2:
-    input_ids = tf.expand_dims(input_ids, axis=[-1])
+    input_ids = tf.expand_dims(input_ids, axis=[-1])    # [batch_size, seq_length, 1].
 
-  embedding_table = tf.get_variable(
+  embedding_table = tf.get_variable(                    # [vocab_size, embedding_size]
       name=word_embedding_name,
       shape=[vocab_size, embedding_size],
       initializer=create_initializer(initializer_range))
 
-  flat_input_ids = tf.reshape(input_ids, [-1])
+  # 两种方法实现
+  flat_input_ids = tf.reshape(input_ids, [-1])          # [batch_size x seq_length]
   if use_one_hot_embeddings:
     one_hot_input_ids = tf.one_hot(flat_input_ids, depth=vocab_size)
-    output = tf.matmul(one_hot_input_ids, embedding_table)
+    output = tf.matmul(one_hot_input_ids, embedding_table)   # [batch_size x seq_length, embedding_size]
   else:
     output = tf.gather(embedding_table, flat_input_ids)
 
   input_shape = get_shape_list(input_ids)
 
   output = tf.reshape(output,
-                      input_shape[0:-1] + [input_shape[-1] * embedding_size])
+                      input_shape[0:-1] + [input_shape[-1] * embedding_size])  # [batch_size, seq_length, embedding_size]
   return (output, embedding_table)
 
 
@@ -487,8 +472,8 @@ def embedding_postprocessor(input_tensor,
     output += token_type_embeddings
 
   if use_position_embeddings:
-    assert_op = tf.assert_less_equal(seq_length, max_position_embeddings)
-    with tf.control_dependencies([assert_op]):
+    assert_op = tf.assert_less_equal(seq_length, max_position_embeddings)  # 保证seq_length <= max_position_embeddings
+    with tf.control_dependencies([assert_op]):                             # assert_op运行后才能执行
       full_position_embeddings = tf.get_variable(
           name=position_embedding_name,
           shape=[max_position_embeddings, width],
@@ -502,7 +487,7 @@ def embedding_postprocessor(input_tensor,
       # for position [0, 1, 2, ..., max_position_embeddings-1], and the current
       # sequence has positions [0, 1, 2, ... seq_length-1], so we can just
       # perform a slice.
-      position_embeddings = tf.slice(full_position_embeddings, [0, 0],
+      position_embeddings = tf.slice(full_position_embeddings, [0, 0],     # [seq_length, width]
                                      [seq_length, -1])
       num_dims = len(output.shape.as_list())
 
@@ -513,9 +498,9 @@ def embedding_postprocessor(input_tensor,
       for _ in range(num_dims - 2):
         position_broadcast_shape.append(1)
       position_broadcast_shape.extend([seq_length, width])
-      position_embeddings = tf.reshape(position_embeddings,
+      position_embeddings = tf.reshape(position_embeddings,                # [1, seq_length, width]
                                        position_broadcast_shape)
-      output += position_embeddings
+      output += position_embeddings                                        # broadcast
 
   output = layer_norm_and_dropout(output, dropout_prob)
   return output
