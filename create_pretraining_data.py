@@ -1,17 +1,3 @@
-# coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """Create masked LM/next sentence masked_lm TF examples for BERT."""
 
 from __future__ import absolute_import
@@ -76,7 +62,7 @@ class TrainingInstance(object):
     self.masked_lm_positions = masked_lm_positions
     self.masked_lm_labels = masked_lm_labels
 
-  def __str__(self):
+  def __str__(self):  # 使用print时自动调用，用于显示想关注的信息
     s = ""
     s += "tokens: %s\n" % (" ".join(
         [tokenization.printable_text(x) for x in self.tokens]))
@@ -179,8 +165,13 @@ def create_float_feature(values):
 def create_training_instances(input_files, tokenizer, max_seq_length,
                               dupe_factor, short_seq_prob, masked_lm_prob,
                               max_predictions_per_seq, rng):
-  """Create `TrainingInstance`s from raw text."""
-  all_documents = [[]]
+  """Create `TrainingInstance`s from raw text.
+    dupe_factor: Number of times to duplicate the input data (with different masks).
+    short_seq_prob: Probability of creating sequences which are shorter than the maximum length.
+    masked_lm_prob: 随机遮盖掉整个输入序列15%的token.
+    max_predictions_per_seq: Maximum number of masked LM predictions per sequence.
+  """
+  all_documents = [[]]  # 外层索引表示文章，内层索引表示句子
 
   # Input file format:
   # (1) One sentence per line. These should ideally be actual sentences, not
@@ -196,7 +187,8 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
           break
         line = line.strip()
 
-        # Empty lines are used as document delimiters
+        # Empty lines are used as document delimiters 
+        # 空行作为document的分隔符
         if not line:
           all_documents.append([])
         tokens = tokenizer.tokenize(line)
@@ -318,6 +310,7 @@ def create_instances_from_document(
         tokens.append("[SEP]")
         segment_ids.append(1)
 
+        # tokens是masked后的tokens，即含有[mask]; maksed_lm_labels为mask位置的标签
         (tokens, masked_lm_positions,
          masked_lm_labels) = create_masked_lm_predictions(
              tokens, masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
@@ -334,7 +327,8 @@ def create_instances_from_document(
 
   return instances
 
-
+# 本身tuple作为一个只读list，只能通过位置进行访问，如p[0]。
+# 使用namedtuple之后可以采用属性名称的方式进行访问，增大了可读性，带来了方便。
 MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
                                           ["index", "label"])
 
@@ -439,9 +433,9 @@ def main(_):
   tokenizer = tokenization.FullTokenizer(
       vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
-  input_files = []
+  input_files = []  # 输入文件路径列表
   for input_pattern in FLAGS.input_file.split(","):
-    input_files.extend(tf.gfile.Glob(input_pattern))
+    input_files.extend(tf.gfile.Glob(input_pattern))  # 将正确的文件路径（存在）放入路径列表
 
   tf.logging.info("*** Reading from input files ***")
   for input_file in input_files:
@@ -463,6 +457,7 @@ def main(_):
 
 
 if __name__ == "__main__":
+  # 必要参数
   flags.mark_flag_as_required("input_file")
   flags.mark_flag_as_required("output_file")
   flags.mark_flag_as_required("vocab_file")

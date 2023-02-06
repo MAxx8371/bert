@@ -311,7 +311,7 @@ def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
       name = m.group(1)
     name_to_variable[name] = var
 
-  init_vars = tf.train.list_variables(init_checkpoint)
+  init_vars = tf.train.list_variables(init_checkpoint) # 获取checkpoint中的变量值
 
   assignment_map = collections.OrderedDict()
   for x in init_vars:

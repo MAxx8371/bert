@@ -1,17 +1,3 @@
-# coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """Functions and classes related to optimization (weight updates)."""
 
 from __future__ import absolute_import
@@ -80,7 +66,7 @@ def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu):
   # However, `AdamWeightDecayOptimizer` doesn't do this. But if you use
   # a different optimizer, you should probably take this line out.
   new_global_step = global_step + 1
-  train_op = tf.group(train_op, [global_step.assign(new_global_step)])
+  train_op = tf.group(train_op, [global_step.assign(new_global_step)]) # 是否global_step一定要加[]
   return train_op
 
 
@@ -154,7 +140,7 @@ class AdamWeightDecayOptimizer(tf.train.Optimizer):
           [param.assign(next_param),
            m.assign(next_m),
            v.assign(next_v)])
-    return tf.group(*assignments, name=name)
+    return tf.group(*assignments, name=name)   # list前加*用于序列解包
 
   def _do_use_weight_decay(self, param_name):
     """Whether to use L2 weight decay for `param_name`."""
@@ -168,7 +154,7 @@ class AdamWeightDecayOptimizer(tf.train.Optimizer):
 
   def _get_variable_name(self, param_name):
     """Get the variable name from the tensor name."""
-    m = re.match("^(.*):\\d+$", param_name)
+    m = re.match("^(.*):\\d+$", param_name)  # 正则表达式匹配，^,$意味着要整行匹配
     if m is not None:
-      param_name = m.group(1)
+      param_name = m.group(1)                # group(1)表示要取出(.*)匹配的部分
     return param_name

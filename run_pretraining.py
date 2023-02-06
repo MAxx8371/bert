@@ -240,7 +240,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
                          label_ids, label_weights):
   """Get loss and log probs for the masked LM."""
-  input_tensor = gather_indexes(input_tensor, positions)
+  input_tensor = gather_indexes(input_tensor, positions)   # [batch_size*masked_length, width]
 
   with tf.variable_scope("cls/predictions"):
     # We apply one more non-linear transformation before the output layer.
@@ -260,12 +260,12 @@ def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
         "output_bias",
         shape=[bert_config.vocab_size],
         initializer=tf.zeros_initializer())
-    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
-    logits = tf.nn.bias_add(logits, output_bias)
+    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)  # [batch_size*masked_length, vocab_size]
+    logits = tf.nn.bias_add(logits, output_bias)  
     log_probs = tf.nn.log_softmax(logits, axis=-1)
 
-    label_ids = tf.reshape(label_ids, [-1])
-    label_weights = tf.reshape(label_weights, [-1])
+    label_ids = tf.reshape(label_ids, [-1])                             # [batch_size*masked_length]
+    label_weights = tf.reshape(label_weights, [-1])                     # [batch_size*masked_length]
 
     one_hot_labels = tf.one_hot(
         label_ids, depth=bert_config.vocab_size, dtype=tf.float32)
@@ -306,18 +306,19 @@ def get_next_sentence_output(bert_config, input_tensor, labels):
 
 
 def gather_indexes(sequence_tensor, positions):
-  """Gathers the vectors at the specific positions over a minibatch."""
+  """Gathers the vectors at the specific positions over a minibatch.
+     获取指定位置上的张量"""
   sequence_shape = modeling.get_shape_list(sequence_tensor, expected_rank=3)
   batch_size = sequence_shape[0]
   seq_length = sequence_shape[1]
   width = sequence_shape[2]
 
   flat_offsets = tf.reshape(
-      tf.range(0, batch_size, dtype=tf.int32) * seq_length, [-1, 1])
-  flat_positions = tf.reshape(positions + flat_offsets, [-1])
-  flat_sequence_tensor = tf.reshape(sequence_tensor,
+      tf.range(0, batch_size, dtype=tf.int32) * seq_length, [-1, 1])   # [batch_size, 1]
+  flat_positions = tf.reshape(positions + flat_offsets, [-1])          # [batch_size * masked_length]
+  flat_sequence_tensor = tf.reshape(sequence_tensor,                   # [batch_size * seq_length, width]
                                     [batch_size * seq_length, width])
-  output_tensor = tf.gather(flat_sequence_tensor, flat_positions)
+  output_tensor = tf.gather(flat_sequence_tensor, flat_positions)      # [batch_size * masked_length, width]
   return output_tensor
 
 
@@ -353,7 +354,7 @@ def input_fn_builder(input_files,
     # For eval, we want no shuffling and parallel reading doesn't matter.
     if is_training:
       d = tf.data.Dataset.from_tensor_slices(tf.constant(input_files))
-      d = d.repeat()
+      d = d.repeat()     # 没有参数，此时无限重复
       d = d.shuffle(buffer_size=len(input_files))
 
       # `cycle_length` is the number of parallel files that get read.
