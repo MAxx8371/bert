@@ -4,9 +4,8 @@ import os
 import collections
 import fcntl
 from joblib import Parallel, delayed
-
 import sys
-sys.path.append(r"F:\project\bert\bert")
+sys.path.append("/root/bert/bert")
 import tokenization
 
 flags = tf.flags
@@ -17,11 +16,6 @@ flags.DEFINE_string(
     "data_dir", None,
     "The input data dir. Should contain the .tsv files (or other data files) "
     "for the task.")
-
-# flags.DEFINE_string(
-#     "bert_config_file", None,
-#     "The config json file corresponding to the pre-trained BERT model. "
-#     "This specifies the model architecture.")
 
 flags.DEFINE_string("vocab_file", None,
                     "The vocabulary file that the BERT model was trained on.")
@@ -34,6 +28,14 @@ flags.DEFINE_bool(
     "do_lower_case", True,
     "Whether to lower case the input text. Should be True for uncased "
     "models and False for cased models.")
+
+flags.DEFINE_integer(
+    "max_seq_length", 128,
+    "The maximum total input sequence length after WordPiece tokenization. "
+    "Sequences longer than this will be truncated, and sequences shorter "
+    "than this will be padded.")
+
+flags.DEFINE_bool("do_train", True, "Whether to run training.")
 
 class InputExample(object):
   """A single training/test example for simple sequence classification."""
@@ -105,7 +107,7 @@ class SST2Processor(DataProcessor):
 
   def get_labels(self):
     """See base class."""
-    return [0, 1]
+    return ['0','1']
 
   def _create_examples(self, lines, set_type):
     """Creates examples for the training and dev sets."""
@@ -114,7 +116,7 @@ class SST2Processor(DataProcessor):
       if i == 0:
         continue
       guid = "%s-%s" % (set_type, i)
-      sentence, sentiment = line.strip().split("\t")
+      sentence, sentiment = line[0], line[1]
       text_a = tokenization.convert_to_unicode(sentence)
       if set_type == "test":
         label = "contradiction"
@@ -127,33 +129,29 @@ class SST2Processor(DataProcessor):
 def file_based_convert_examples_to_features(
     examples, label_list, max_seq_length, tokenizer, output_file):
   """Convert a set of `InputExample`s to a TFRecord file."""
-
-  Parallel(n_jobs=6, verbose=4, backend='mulpiprocessing')(
-        delayed(TFRecoder_writer)(output_file, ex_index, example, label_list,
-                    max_seq_length, tokenizer) for ex_index, example in enumerate(examples))
-
-def TFRecoder_writer(output_file, ex_index, example, label_list,
-                    max_seq_length, tokenizer):
   writer = tf.python_io.TFRecordWriter(output_file)
 
-  fcntl.flock(writer.fileno(), fcntl.LOCK_EX) #加锁
-  feature = convert_single_example(ex_index, example, label_list,
+  for (ex_index, example) in enumerate(examples):
+    if ex_index % 10000 == 0:
+      tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
+
+    feature = convert_single_example(ex_index, example, label_list,
                                      max_seq_length, tokenizer)
-  def create_int_feature(values):
+
+    def create_int_feature(values):
       f = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
       return f
 
-  features = collections.OrderedDict()
-  features["input_ids"] = create_int_feature(feature.input_ids)
-  features["input_mask"] = create_int_feature(feature.input_mask)
-  features["segment_ids"] = create_int_feature(feature.segment_ids)
-  features["label_ids"] = create_int_feature([feature.label_id])
+    features = collections.OrderedDict()
+    features["input_ids"] = create_int_feature(feature.input_ids)
+    features["input_mask"] = create_int_feature(feature.input_mask)
+    features["segment_ids"] = create_int_feature(feature.segment_ids)
+    features["label_ids"] = create_int_feature([feature.label_id])
 
-  tf_example = tf.train.Example(features=tf.train.Features(feature=features))
-  writer.write(tf_example.SerializeToString())
-  
+    tf_example = tf.train.Example(features=tf.train.Features(feature=features))
+    writer.write(tf_example.SerializeToString())
   writer.close()
-
+    
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
   """Converts a single `InputExample` into a single `InputFeatures`."""
@@ -245,15 +243,18 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
   return feature
 
 if __name__ == '__main__':
-    tf.logging.set_verbosity(tf.logging.INFO)
+  tf.logging.set_verbosity(tf.logging.INFO)
 
-    processor = SST2Processor()
+  processor = SST2Processor()
 
-    tokenizer = tokenization.FullTokenizer(
-    vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
+  tokenizer = tokenization.FullTokenizer(
+  vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
-    label_list = processor.get_labels()
-    train_examples = processor.get_train_examples(FLAGS.data_dir)
+  label_list = processor.get_labels()
+  train_examples = processor.get_train_examples(FLAGS.data_dir)
+
+  tf.gfile.MakeDirs(FLAGS.output_dir)
+  print(FLAGS.output_dir)
 
     # if FLAGS.do_train:
     #     train_examples = processor.get_train_examples(FLAGS.data_dir)
@@ -261,11 +262,7 @@ if __name__ == '__main__':
     #         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     #     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
 
-    if FLAGS.do_train:
-        train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
-        file_based_convert_examples_to_features(
+  if FLAGS.do_train:
+    train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
+    file_based_convert_examples_to_features(
             train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
-        # tf.logging.info("***** Running training *****")
-        # tf.logging.info("  Num examples = %d", len(train_examples))
-        # tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
-        # tf.logging.info("  Num steps = %d", num_train_steps)
