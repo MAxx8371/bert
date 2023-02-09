@@ -98,6 +98,13 @@ class BertModel(object):
   input_ids = tf.constant([[31, 51, 99], [15, 5, 0]])
   input_mask = tf.constant([[1, 1, 1], [1, 1, 0]])
   token_type_ids = tf.constant([[0, 0, 1], [0, 2, 0]])
+  attention_mask = [[[1. 1. 1.]
+                     [1. 1. 1.]
+                     [1. 1. 1.]]
+
+                    [[1. 1. 0.]
+                     [1. 1. 0.]
+                     [1. 1. 0.]]]
 
   config = modeling.BertConfig(vocab_size=32000, hidden_size=512,
     num_hidden_layers=8, num_attention_heads=6, intermediate_size=1024)
@@ -111,7 +118,6 @@ class BertModel(object):
   ...
   ```
   """
-
   def __init__(self,
                config,
                is_training,
@@ -137,7 +143,7 @@ class BertModel(object):
       ValueError: The config is invalid or one of the input tensor shapes
         is invalid.
     """
-    config = copy.deepcopy(config)
+    config = copy.deepcopy(config)  # 此处deepcopy是为了防止下面修改config时连输入也修改
     if not is_training:
       config.hidden_dropout_prob = 0.0
       config.attention_probs_dropout_prob = 0.0
@@ -398,8 +404,8 @@ def embedding_lookup(input_ids,
   # 两种方法实现
   flat_input_ids = tf.reshape(input_ids, [-1])          # [batch_size x seq_length]
   if use_one_hot_embeddings:
-    one_hot_input_ids = tf.one_hot(flat_input_ids, depth=vocab_size)
-    output = tf.matmul(one_hot_input_ids, embedding_table)   # [batch_size x seq_length, embedding_size]
+    one_hot_input_ids = tf.one_hot(flat_input_ids, depth=vocab_size)   # [batch_size x seq_length, vocab_size]
+    output = tf.matmul(one_hot_input_ids, embedding_table)             # [batch_size x seq_length, embedding_size]
   else:
     output = tf.gather(embedding_table, flat_input_ids)
 
@@ -747,10 +753,7 @@ def transformer_model(input_tensor,
                       attention_probs_dropout_prob=0.1,
                       initializer_range=0.02,
                       do_return_all_layers=False):
-  """Multi-headed, multi-layer Transformer from "Attention is All You Need".
-
-  This is almost an exact implementation of the original Transformer encoder.
-
+  """
   See the original paper:
   https://arxiv.org/abs/1706.03762
 
@@ -805,7 +808,7 @@ def transformer_model(input_tensor,
   # forth from a 3D tensor to a 2D tensor. Re-shapes are normally free on
   # the GPU/CPU but may not be free on the TPU, so we want to minimize them to
   # help the optimizer.
-  prev_output = reshape_to_matrix(input_tensor)
+  prev_output = reshape_to_matrix(input_tensor)  # [batch_size*seq_length, width]
 
   all_layer_outputs = []
   for layer_idx in range(num_hidden_layers):
