@@ -433,9 +433,12 @@ if __name__ == '__main__':
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
-
+  
+  model_dir = os.path.join(FLAGS.output_dir, "model")
+  if not tf.gfile.IsDirectory(train_file):
+    tf.gfile.MkDir(model_dir)
   run_config = tf.estimator.RunConfig(
-      model_dir=FLAGS.output_dir,
+      model_dir=model_dir,
       save_checkpoints_steps=FLAGS.save_checkpoints_steps)
   
   model_fn = model_fn_builder(
@@ -529,9 +532,7 @@ if __name__ == '__main__':
         sentiment = prediction["sentiments"]
         probabilitie = prediction["probabilities"]
         sentence = tokenization.printable_text(predict_examples[i+1].text_a)
-        # output_line = "\t".join(
-        #     str(class_probability)
-        #     for class_probability in probabilities) + "\n"
+        
         output_line = sentence + "\t" + str(sentiment) +"\t" + str(probabilitie) + "\n"
         writer.write(output_line)
         num_written_lines += 1
