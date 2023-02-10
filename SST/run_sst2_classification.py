@@ -10,6 +10,7 @@ flags = tf.flags
 
 FLAGS = flags.FLAGS
 
+# path
 flags.DEFINE_string(
     "data_dir", None,
     "The input data dir. Should contain the .tsv files (or other data files) "
@@ -22,6 +23,16 @@ flags.DEFINE_string(
     "output_dir", None,
     "The output directory where the model checkpoints will be written.")
 
+flags.DEFINE_string(
+    "bert_config_file", None,
+    "The config json file corresponding to the pre-trained BERT model. "
+    "This specifies the model architecture.")
+
+flags.DEFINE_string(
+    "init_checkpoint", None,
+    "Initial checkpoint (usually from a pre-trained BERT model).")
+
+# configuration
 flags.DEFINE_bool(
     "do_lower_case", True,
     "Whether to lower case the input text. Should be True for uncased "
@@ -35,8 +46,30 @@ flags.DEFINE_integer(
 
 flags.DEFINE_bool("do_train", True, "Whether to run training.")
 
+flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
+
+flags.DEFINE_bool(
+    "do_predict", False,
+    "Whether to run the model in inference mode on the test set.")
+
 flags.DEFINE_bool("use_tpu", False, "Whether to use TPU or GPU/CPU.")
 
+flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
+
+flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
+
+flags.DEFINE_integer("eval_batch_size", 16, "Total batch size for eval.")
+
+flags.DEFINE_float("num_train_epochs", 3.0,
+                   "Total number of training epochs to perform.")
+
+flags.DEFINE_float(
+    "warmup_proportion", 0.1,
+    "Proportion of training to perform linear learning rate warmup for. "
+    "E.g., 0.1 = 10% of training.")
+
+flags.DEFINE_integer("save_checkpoints_steps", 1000,
+                     "How often to save the model checkpoint.")
 
 class InputExample(object):
   """A single training/test example for simple sequence classification."""
@@ -117,12 +150,14 @@ class SST2Processor(DataProcessor):
       if i == 0:
         continue
       guid = "%s-%s" % (set_type, i)
-      sentence, sentiment = line[0], line[1]
-      text_a = tokenization.convert_to_unicode(sentence)
+      sentence, label = line[0], line[1]
+      
       if set_type == "test":
-        label = "contradiction"
-      else:
-        label = tokenization.convert_to_unicode(sentiment)
+        label = "0"
+        sentence = line[1]
+        
+      text_a = tokenization.convert_to_unicode(sentence)
+      label = tokenization.convert_to_unicode(label)
       examples.append(
           InputExample(guid=guid, text_a=text_a, label=label))
     return examples
@@ -149,7 +184,7 @@ def file_based_convert_examples_to_features(
     features["segment_ids"] = create_int_feature(feature.segment_ids)
     features["label_ids"] = create_int_feature([feature.label_id])
 
-    tf_example = tf.train.Example(features=tf.train.Features(feature=features))
+    tf_example =tf.train.Example(features=tf.train.Features(feature=features))
     writer.write(tf_example.SerializeToString())
   writer.close()
     
@@ -305,12 +340,11 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
-
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+        
+      output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
           loss=total_loss,
-          train_op=train_op,
-          scaffold_fn=scaffold_fn)
+          train_op=train_op)
     elif mode == tf.estimator.ModeKeys.EVAL:
 
       def metric_fn(per_example_loss, label_ids, logits, is_real_example):
@@ -320,21 +354,22 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         loss = tf.metrics.mean(values=per_example_loss, weights=is_real_example)
         return {
             "eval_accuracy": accuracy,
-            "eval_loss": loss,
+            "eval_loss": loss
         }
 
-      eval_metrics = (metric_fn,
-                      [per_example_loss, label_ids, logits, is_real_example])
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      # eval_metrics = (metric_fn,
+      #                 [per_example_loss, label_ids, logits, is_real_example])
+      output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
           loss=total_loss,
-          eval_metrics=eval_metrics,
-          scaffold_fn=scaffold_fn)
+          eval_metric_ops=metric_fn(per_example_loss, label_ids, logits, is_real_example))
     else:
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      probabilities = tf.reduce_max(logits, axis=-1)
+      predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
+      output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
-          predictions={"probabilities": probabilities},
-          scaffold_fn=scaffold_fn)
+          predictions={"probabilities": probabilities,
+                       "sentiments": predictions})
     return output_spec
 
   return model_fn
@@ -355,7 +390,10 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
 
   def input_fn(params):
     """The actual input function."""
-    batch_size = params["batch_size"]
+    if is_training:
+        batch_size = params["train_batch_size"]
+    else: 
+        batch_size = params["eval_batch_size"]
 
     # For training, we want a lot of parallel reading and shuffling.
     # For eval, we want no shuffling and parallel reading doesn't matter.
@@ -412,13 +450,15 @@ if __name__ == '__main__':
 
   estimator = tf.estimator.Estimator(
     model_fn=model_fn,
-    config=run_config
-  )
+    config=run_config,
+    params={"train_batch_size": FLAGS.train_batch_size,
+            "eval_batch_size": FLAGS.eval_batch_size})
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
-    file_based_convert_examples_to_features(
-            train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
+    if not tf.gfile.Exists(train_file):
+      file_based_convert_examples_to_features(
+          train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
     
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Num examples = %d", len(train_examples))
@@ -430,3 +470,69 @@ if __name__ == '__main__':
         is_training=True,
         drop_remainder=False)
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
+    
+  if FLAGS.do_eval:
+    eval_examples = processor.get_dev_examples(FLAGS.data_dir)
+    num_actual_eval_examples = len(eval_examples)
+
+    eval_file = os.path.join(FLAGS.output_dir, "eval.tf_record")
+    if not tf.gfile.Exists(eval_file):
+      file_based_convert_examples_to_features(
+          eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file)
+
+    tf.logging.info("***** Running evaluation *****")
+    tf.logging.info("  Num examples = %d", num_actual_eval_examples)
+    tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+    
+    eval_input_fn = file_based_input_fn_builder(
+        input_file=eval_file,
+        seq_length=FLAGS.max_seq_length,
+        is_training=False,
+        drop_remainder=False)
+
+    result = estimator.evaluate(input_fn=eval_input_fn, steps=None)
+    
+    output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
+    with tf.gfile.GFile(output_eval_file, "w") as writer:
+      tf.logging.info("***** Eval results *****")
+      for key in sorted(result.keys()):
+        tf.logging.info("  %s = %s", key, str(result[key]))
+        writer.write("%s = %s\n" % (key, str(result[key])))
+        
+  if FLAGS.do_predict:
+    predict_examples = processor.get_test_examples(FLAGS.data_dir)
+    tf.logging.info(predict_examples[0])
+    num_actual_predict_examples = len(predict_examples)
+
+    predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
+    file_based_convert_examples_to_features(predict_examples, label_list,
+                                            FLAGS.max_seq_length, tokenizer,
+                                            predict_file)
+
+    tf.logging.info("***** Running prediction*****")
+    tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+
+    predict_drop_remainder = True if FLAGS.use_tpu else False
+    predict_input_fn = file_based_input_fn_builder(
+        input_file=predict_file,
+        seq_length=FLAGS.max_seq_length,
+        is_training=False,
+        drop_remainder=predict_drop_remainder)
+
+    result = estimator.predict(input_fn=predict_input_fn)
+
+    output_predict_file = os.path.join(FLAGS.output_dir, "test_results.txt")
+    with tf.gfile.GFile(output_predict_file, "w") as writer:
+      num_written_lines = 0
+      tf.logging.info("***** Predict results *****")
+      for (i, prediction) in enumerate(result):
+        sentiment = prediction["sentiments"]
+        probabilitie = prediction["probabilities"]
+        sentence = tokenization.printable_text(predict_examples[i+1].text_a)
+        # output_line = "\t".join(
+        #     str(class_probability)
+        #     for class_probability in probabilities) + "\n"
+        output_line = sentence + "\t" + str(sentiment) +"\t" + str(probabilitie) + "\n"
+        writer.write(output_line)
+        num_written_lines += 1
+    assert num_written_lines == num_actual_predict_examples
